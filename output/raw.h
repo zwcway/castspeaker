@@ -28,6 +28,6 @@
 
 int raw_output_init();
 
-int raw_output_send(channel_header_t *header, const uint8_t *data);
+int raw_output_send(pcm_header_t *header, const uint8_t *data);
 
 #endif

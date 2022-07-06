@@ -20,10 +20,9 @@
 #ifndef  SPEAKER_RECEIVER_H
 #define  SPEAKER_RECEIVER_H
 
-#include <netinet/in.h>
-#include "speaker/speaker.h"
+#include "speaker.h"
 
-typedef int (*output_send_fn)(channel_header_t *header, const uint8_t *data);
+typedef int (*output_send_fn)(pcm_header_t *header, const uint8_t *data);
 
 typedef int (*set_audio_format_fn)(audio_rate_t rate, audio_bits_t bits);
 

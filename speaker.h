@@ -1,12 +1,11 @@
 #ifndef NETWORK_H
 #define NETWORK_H
 
-#include <arpa/inet.h>
 #include <stdlib.h>
 #include <string.h>
 #include <common/package/pcm.h>
 
-#include "common/castspeaker.h"
+#include "common/common.h"
 #include "common/audio.h"
 #include "common/speaker_struct.h"
 
@@ -23,7 +22,7 @@ enum output_type {
     OUTPUT_TYPE_PULSEAUDIO
 };
 
-extern channel_header_t recv_buf[BUFFER_LIST_SIZE];
+extern pcm_header_t recv_buf[BUFFER_LIST_SIZE];
 extern uint32_t ctrl_mtu;
 
 void sexit(int no);

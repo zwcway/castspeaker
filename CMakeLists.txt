@@ -4,8 +4,29 @@ if (NOT ESP_PLATFORM)
   project(castspeaker LANGUAGES C)
 endif ()
 
-option(BUILD_TESTS "Build tests (in test/castspeaker_test)" ON)
+if (MACOS)
+  message(FATAL "macOS not supported.")
+endif ()
+if (WIN32)
+  add_definitions(-D_WIN32_WINNT=0x0601) # win7
+endif ()
+
+option(BUILD_TESTS "Build tests" OFF)
 option(PACKAGE_PACKED "Pack UDP package" OFF)
+
+set(SPEAKER_SOURCES
+    "speaker_receiver.c"
+    "speaker_multicast.c")
+set(SPEAKER_HEADERS
+    "speaker_receiver.h"
+    "speaker_multicast.h")
+set(SPEAKER_HEADER_DIRS
+    "./")
+
+set(SPEAKER_LIBRARIES
+    ${CMAKE_THREAD_LIBS_INIT}
+    common
+    m)
 
 # Configure paths
 if (NOT DEFINED CMAKE_INSTALL_BINDIR)
@@ -22,7 +43,30 @@ if (NOT DEFINED CMAKE_INSTALL_INCLUDEDIR)
       PATH "Output directory for header files")
 endif ()
 
-if (NOT ESP_PLATFORM)
+if (ESP_PLATFORM)
+
+  set(COMPONENT_ADD_INCLUDEDIRS ${SPEAKER_HEADER_DIRS})
+
+  set(COMPONENT_SRCS ${SPEAKER_SOURCES})
+
+  register_component()
+else ()
+  set(SPEAKRE_EXE_NAME castspeaker)
+
+  list(APPEND SPEAKER_SOURCES
+      speaker.c
+      output/raw.c
+      )
+  list(APPEND SPEAKER_HEADERS
+      speaker.h
+      output/raw.h
+      )
+  list(APPEND SPEAKER_LIBRARIES
+      Threads::Threads)
+
+  find_package(Threads REQUIRED)
+  find_package(PkgConfig)
+
   set(INCLUDE_DIRS
       "${CMAKE_SOURCE_DIR}"
       "${CMAKE_INSTALL_INCLUDEDIR}")
@@ -34,41 +78,9 @@ if (NOT ESP_PLATFORM)
     add_subdirectory(test)
   endif ()
 
-
   if (PACKAGE_PACKED)
     add_definitions(-DPACKAGE_PACKED)
   endif ()
-
-  include(GNUInstallDirs)
-
-endif ()
-
-############################# speaker start ####################################
-set(SPEAKER_SOURCES
-    "speaker/speaker_receiver.c"
-    "speaker/speaker_multicast.c")
-set(SPEAKER_HEADERS
-    "speaker/speaker_receiver.h"
-    "speaker/speaker_multicast.h")
-
-set(SPEAKER_LIBRARIES
-    ${CMAKE_THREAD_LIBS_INIT}
-    common
-    Threads::Threads)
-
-if (NOT ESP_PLATFORM)
-  set(SPEAKRE_EXE_NAME castspeaker)
-
-  list(APPEND SPEAKER_SOURCES
-      speaker/speaker.c
-      speaker/output/raw.c
-      )
-  list(APPEND SPEAKER_HEADERS
-      speaker/speaker.h
-      speaker/output/raw.h
-      )
-  find_package(Threads REQUIRED)
-  find_package(PkgConfig)
 
   # find pulseaudio
   option(PULSEAUDIO_ENABLE "Enable PulseAudio" OFF)
@@ -111,23 +123,14 @@ if (NOT ESP_PLATFORM)
     endif ()
   endif ()
 
-  add_subdirectory(common)
-
   add_executable(${SPEAKRE_EXE_NAME} ${SPEAKER_SOURCES} ${SPEAKER_HEADERS})
-
-  target_link_libraries(${SPEAKRE_EXE_NAME} ${SPEAKER_LIBRARIES})
 
   target_include_directories(${SPEAKRE_EXE_NAME} PUBLIC "${PROJECT_BINARY_DIR}")
 
   include(GNUInstallDirs)
   install(TARGETS ${SPEAKRE_EXE_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif ()
-########################## speaker end #################################
 
-if (ESP32_PLATFORM)
-  set(COMPONENT_ADD_INCLUDEDIRS ${SPEAKER_HEADERS})
+add_subdirectory(common)
 
-  set(COMPONENT_SRCS ${SPEAKER_SOURCES})
-
-  register_component()
-endif ()
+target_link_libraries(${SPEAKRE_EXE_NAME} ${SPEAKER_LIBRARIES})

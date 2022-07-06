@@ -30,11 +30,11 @@ int raw_output_init() {
   return 0;
 }
 
-int raw_output_send(channel_header_t *header, const uint8_t *data) {
+int raw_output_send(pcm_header_t *header, const uint8_t *data) {
   header_sample_t *hs = &header->sample;
 
   if (memcmp(&ro_data, hs, sizeof(header_sample_t)) != 0) {
-    memcpy(&ro_data, hs, sizeof(header_sample_t));
+    ro_data = *hs;
 
     rate = rate_name(hs->rate);
     bits = bits_name(hs->bits);
