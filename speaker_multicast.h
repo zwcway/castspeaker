@@ -20,8 +20,7 @@
 #ifndef MULTICAST_H
 #define MULTICAST_H
 
-#include <netinet/in.h>
-#include "common/castspeaker.h"
+#include "common/common.h"
 #include "common/audio.h"
 #include "speaker.h"
 
@@ -29,7 +28,7 @@
 struct multicast_config {
     speaker_id_t id;
     addr_t *multicast_group;
-    interface_t *interface;
+    interface_t *iface;
     uint16_t multicast_port;
     uint16_t data_port;
     audio_rate_t rate[RATEMASK_SIZE];

@@ -1,16 +1,13 @@
 #include <stdio.h>
 #include <unistd.h>
-#include <sys/socket.h>
-#include <sys/un.h>
 #include <pthread.h>
-#include <net/if.h>
-#include <sys/ioctl.h>
-#include <sys/resource.h>
 #include <signal.h>
-#include <common/log.h>
-#include <common/event/select.h>
-#include <common/event/udp.h>
-#include <common/event/receive.h>
+#include <math.h>
+#include "common/log.h"
+#include "common/event/select.h"
+#include "common/event/udp.h"
+#include "common/event/receive.h"
+#include "common/connection.h"
 #include "speaker.h"
 #include "output/raw.h"
 #include "common/error.h"
@@ -36,7 +33,7 @@
 LOG_TAG_DECLR("speaker");
 
 
-channel_header_t recv_buf[BUFFER_LIST_SIZE] = {0};
+pcm_header_t recv_buf[BUFFER_LIST_SIZE] = {0};
 
 int exit_thread_flag = 0;
 int verbosity = 0;
@@ -51,10 +48,14 @@ static output_send_fn output_fn;
 static char *alsa_device = "default";
 static char *pa_sink = NULL;
 static char *pa_stream_name = "Audio";
-static interface_t interface = {0};
+static interface_t iface = {0};
 
 uint32_t gen_id() {
-  return interface.ip.type > 0 ? interface.ip.ipv4.s_addr : random();
+#if WIN32
+  return iface.ip.type > 0 ? iface.ip.ipv4.s_addr : rand();
+#else
+  return iface.ip.type > 0 ? iface.ip.ipv4.s_addr : random();
+#endif
 }
 
 static void show_help(const char *arg0, int no) {
@@ -66,9 +67,9 @@ static void show_help(const char *arg0, int no) {
   printf("         -I <id>                   : Use <id> as speaker id. Default is genrate\n");
   printf("                                     in auto.\n");
   printf("         -p <port>                 : Use <port> instead of default port %d.\n", DEFAULT_MULTICAST_PORT);
-  printf("         -i <iface>                : Use local interface <iface>. Either the IP\n");
-  printf("                                     or the interface name can be specified. \n");
-  printf("                                     Uses this interface for IGMP.\n");
+  printf("         -i <iface>                : Use local iface <iface>. Either the IP\n");
+  printf("                                     or the iface name can be specified. \n");
+  printf("                                     Uses this iface for IGMP.\n");
   printf("         -6                        : Use ipv6.\n");
   printf("         -g <group>                : Multicast group address.\n");
   printf("         -o pulse|alsa|raw         : Send audio to PulseAudio, ALSA or stdout.\n");
@@ -132,7 +133,7 @@ int main(int argc, char *argv[]) {
         break;
       case 'i':
         if (strlen(optarg) > IF_NAMESIZE) {
-          printf("Too long interface name '%s'\n", optarg);
+          printf("Too long iface name '%s'\n", optarg);
           exit(EERR_ARG);
         }
         interface_name = strdup(optarg);
@@ -182,13 +183,26 @@ int main(int argc, char *argv[]) {
   }
 
   if (interface_name) {
-    if (get_interface(family, &interface, interface_name) < 0) {
-      printf("Invalid interface: %s\n", interface_name);
+    if (get_interface(family, &iface, interface_name) < 0) {
+      printf("Invalid iface: %s\n", interface_name);
       interface_t list[16] = {0};
       int len = list_interfaces(family, list, 16);
       printf("Av interfaces:\n");
-      for (int i = 0; i < len; ++i) {
-        printf("%d. %s\n", i + 1, list[i].name);
+      if (family == AF_INET) {
+        for (int i = 0; i < len; ++i) {
+          printf("%2d. %15s\t%s\n", list[i].ifindex, addr_ntop(&list[i].ip), list[i].name);
+        }
+      } else {
+        int maxlen = 0;
+        for (int i = 0; i < len; ++i) {
+          maxlen = max(maxlen, strlen(addr_ntop(&list[i].ip)));
+        }
+        char *fmt = malloc(maxlen);
+        sprintf(fmt, "%%2d. %%%ds\t%%s\n", maxlen);
+        for (int i = 0; i < len; ++i) {
+          printf(fmt, list[i].ifindex, addr_ntop(&list[i].ip), list[i].name);
+        }
+        free(fmt);
       }
       printf("\n");
       exit(EERR_ARG);
@@ -197,19 +211,19 @@ int main(int argc, char *argv[]) {
     default_iface_name = malloc(IF_NAMESIZE);
     if (get_default_interface(family, default_iface_name) <= 0) {
       free(default_iface_name);
-      LOGE("Get default interface failed");
+      LOGE("Get default iface failed");
       return -1;
     }
-    if (get_interface(family, &interface, default_iface_name) < 0) {
+    if (get_interface(family, &iface, default_iface_name) < 0) {
       free(default_iface_name);
-      printf("Get default interface failed. Please use -i <iface> and try again.\n");
+      printf("Get default iface failed. Please use -i <iface> and try again.\n");
       exit(EERR_ARG);
     }
     free(default_iface_name);
   }
 
   if (group_ip) {
-    ip_stoa(&multicast_group, group_ip);
+    addr_stoa(&multicast_group, group_ip);
     free(group_ip);
     if (multicast_group.type != family) {
       printf("The multicast group ip family is ipv6, please use -6 and try again.\n");
@@ -221,10 +235,14 @@ int main(int argc, char *argv[]) {
   LOGI("speaker id: %u", speaker_id);
 
   signal(SIGINT, signal_handle);
-  signal(SIGKILL, signal_handle);
   signal(SIGSEGV, signal_handle);
   signal(SIGTERM, signal_handle);
+#ifdef SIGKILL
+  signal(SIGKILL, signal_handle);
+#endif
+#ifdef SIGQUIT
   signal(SIGQUIT, signal_handle);
+#endif
 
   LOGI("Starting receiver");
 
@@ -247,13 +265,15 @@ int main(int argc, char *argv[]) {
       break;
   }
 
+  SOCKET_INIT();
+
   event_init(EVENT_TYPE_SELECT, EVENT_PROTOCOL_UDP, 4096, 100);
 
   // init receiver
 
   struct receiver_config receiver_cfg = {
     .family = family,
-    .ip = interface_name ? &interface.ip : NULL,
+    .ip = interface_name ? &iface.ip : NULL,
     .port = 0,
     .output_cb = output_fn,
   };
@@ -262,7 +282,7 @@ int main(int argc, char *argv[]) {
   struct multicast_config multicast_cfg = {
     .id = speaker_id,
     .multicast_group = multicast_group.type ? &multicast_group : NULL,
-    .interface = &interface,
+    .iface = &iface,
     .multicast_port = multicast_port,
     .data_port = 0,
     .rate = {RATE_44100, RATE_48000},
@@ -289,6 +309,8 @@ void castspeaker_deinit() {
 
   receiver_deinit();
   mcast_deinit();
+
+  SOCKET_DEINIT();
 }
 
 void sexit(int no) {
